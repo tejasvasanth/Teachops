@@ -1,0 +1,45 @@
+{
+  "summary": "Full backend + mobile UI testing of TeachOps. Backend pytest: 25/25 passing (auth, demo-login, me, my-day for all 3 roles, schedule, session roster+403, attendance submit gating, inbox role scoping, leave create+decide approve/reject/409/400/403, chat conversations+messages+compose+404 non-member, notifications read-all, pay list+detail+cross-teacher 403). Frontend mobile UI (390x844): login demo buttons navigate to My Day, header role switcher toggles teacher/coordinator/admin, Schedule renders week chips and sessions, Session workspace supports attendance + Submit (status Completed), Inbox Approve + Reject-with-reason modal with toast confirmation, Compose creates new conversation and routes to thread, Thread send works, Leave screen renders with pickers, Notifications screen lists approvals/replies, Pay list + detailed statement with calculation breakdown render correctly. No deprecated expo packages, no SafeAreaView issues, no red-screen errors. Minor cosmetic: a brief burst of 401s on first mount after login when react-query fires before the Authorization header is set in AuthContext (requests auto-retry and succeed).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/sessions/{id}", "issue": "When session belongs to a different organisation the API returns 404 (correct) but when session is in same org and teacher is not assigned it returns 403 as expected. Behavior correct; no fix needed, just noting the 403 vs 404 branching."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "App bootstrap after demo-login", "issue": "A few protected endpoints (my-day, notifications, pay) sometimes fire with no Authorization header on the very first render after demo-login/role-switch, producing 3-4 CONSOLE 401 errors in the browser. React-query refetches shortly after and succeeds, so no visible UX impact, but noise in logs. Suggest gating queries with `enabled: !!token` in AuthContext consumers.", "affected_testIDs": ["demo-teacher", "demo-switch-coordinator", "demo-switch-teacher", "header-bell"]}
+    ],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "Shadow styles", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\"'. Replace shadowColor/shadowOffset/shadowOpacity/shadowRadius with the new boxShadow API in RN 0.76+ for web parity."},
+      {"component": "Animated / pointerEvents", "issue": "Console warnings: 'Animated: useNativeDriver is not supported ... Falling back to JS-based animation' and 'props.pointerEvents is deprecated. Use style.pointerEvents'. Likely from the Reject modal / toast animations. Low priority, but migrate pointerEvents to style and either remove useNativeDriver on web or wrap in Platform check."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_teachops_api.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: in AuthContext/useQuery consumers, add `enabled: !!token` so protected GETs don't fire before Bearer header is attached (removes transient 401 console noise after demo-login/role switch).",
+    "Optional: migrate deprecated shadow* props to boxShadow and props.pointerEvents to style.pointerEvents to clear RN web warnings.",
+    "Optional: add `data-testid=\"day-chip-<date>\"` to schedule day chips (currently reachable only by text/position)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is single-file (~680 lines) — close to the 700-line split threshold. Consider splitting into routers (auth, my_day, schedule, sessions, inbox, chat, pay) before growing further.",
+    "All MongoDB reads already exclude _id via projection. Good.",
+    "JWT_SECRET falls back to a hardcoded dev string if env is missing — fine for demo, but add a startup assertion for production (DEMO_MODE=false)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/conftest.py (new)",
+    "/app/backend/tests/test_teachops_api.py (new)"
+  ],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "100% of requested flows"},
+  "seed_data_creation": "No new seed data. Tests use the existing idempotent seed (anjali/suresh/meenakshi @teachops.demo, password Demo@12345). Tests create a few TEST_-labelled leave requests and conversations; they do not interfere with normal flows.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend tests live in /app/backend/tests/test_teachops_api.py and use EXPO_PUBLIC_BACKEND_URL from frontend/.env. Demo mode is enabled; use POST /api/auth/demo-login {role: Teacher|Coordinator|Administrator}. The seed is anchored to the current week, so schedule/my-day always have content. Note: the first-returned teacher session may be in 'Verified' state (seed) which blocks attendance edits with 409; use the `editable=True` helper in the test file when exercising attendance/submit flows.",
+  "rca_of_issue": "N/A — no bugs blocking functionality. The 401 bursts after login are a react-query timing nit (queries fire before Authorization header is injected). Mitigation: gate protected queries with `enabled: !!token` or add a short delay/suspense boundary around the authenticated layout."
+}

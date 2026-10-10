@@ -1,0 +1,157 @@
+{
+  "app_name": "TeachOps",
+  "personality": "1 iOS-Native Clean (Adapted for B2B Enterprise SaaS rigor)",
+  "personality_one_liner": "A highly refined, command-center aesthetic prioritizing data density, tabular precision, and crisp native typography over decorative elements.",
+  "color": {
+    "surface": "#FFFFFF",
+    "onSurface": "#0F1115",
+    "surfaceSecondary": "#F4F5F7",
+    "onSurfaceSecondary": "#1E232B",
+    "surfaceTertiary": "#EAECEF",
+    "onSurfaceTertiary": "#2D333B",
+    "surfaceInverse": "#0F1115",
+    "onSurfaceInverse": "#FFFFFF",
+    "brand": "#3B82F6",
+    "onBrand": "#FFFFFF",
+    "brandPrimary": "#3B82F6",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#EFF6FF",
+    "onBrandSecondary": "#1D4ED8",
+    "brandTertiary": "#DBEAFE",
+    "onBrandTertiary": "#1E40AF",
+    "success": "#10B981",
+    "onSuccess": "#FFFFFF",
+    "warning": "#F59E0B",
+    "onWarning": "#FFFFFF",
+    "error": "#EF4444",
+    "onError": "#FFFFFF",
+    "info": "#3B82F6",
+    "onInfo": "#FFFFFF",
+    "border": "#E2E4E9",
+    "borderStrong": "#CBD1DA",
+    "divider": "#F1F3F5",
+    "muted": "#6B7280"
+  },
+  "typography": {
+    "displayFontFamily": "Geist",
+    "textFontFamily": "Geist",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Handle spacing correctly dont have extra spaces where its not required, handle padding and margin corectly and subtle for buttons and components",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Bottom tab bar (when content scrolls behind it).",
+      "Sticky headers over scrolling content.",
+      "Modal scrim entry/exit."
+    ],
+    "dont's": [
+      "Cards in dense lists",
+      "List rows",
+      "Form inputs",
+      "Body content"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "My Day",
+      "purpose": "A command-center hub for operations showing today's timeline rail, pending attendance, and operational metric tiles.",
+      "states": {
+        "loading": "Centered minimal spinner with 'Loading My Day...'",
+        "empty": "Empty state illustration (modern office) with 'Your day is clear.' and a CTA to refresh.",
+        "error": "Readable error message with a 'Retry' button."
+      },
+      "layout": "Grid of density-cozy Metric Tiles at the top (monospaced digits), followed by a vertical 'Timeline Rail' rendering daily schedule/events. Timeline rows stack a headline, status pill, and timestamp, anchored by a continuous left border (rail). High value pending actions (like attendance) sit in standard lists below."
+    },
+    {
+      "name": "Schedule",
+      "purpose": "Detailed calendar views utilizing segmented controls to toggle Day/Week/Month without switching whole views.",
+      "states": {
+        "loading": "Skeleton rows of the timeline rail.",
+        "empty": "Empty state with 'No classes scheduled.'",
+        "error": "Readable error message with a 'Retry' button."
+      },
+      "layout": "Top sticky segmented control (Day/Week/Month). Main scroll view contains the vertical timeline rail. Emphasize hairline borders and tabular numbers for time entries. Include subtle conflict warnings (amber status pills)."
+    },
+    {
+      "name": "Attendance",
+      "purpose": "Session roster for marking attendance using precision segmented controls for P/A/L/E.",
+      "states": {
+        "loading": "Skeleton rows for student list.",
+        "empty": "Empty state with 'No session selected.'",
+        "error": "Readable error message with a 'Retry' button."
+      },
+      "layout": "Sticky header with bulk actions. Vertical list of student rows with avatars (initials or real PNGs). Each row has an equal-width segmented control (Present, Absent, Late, Excused) where active state fills with a semantic tint."
+    },
+    {
+      "name": "Inbox",
+      "purpose": "Unified task and approval center for leave requests with clear status tags.",
+      "states": {
+        "loading": "Skeleton rows of the inbox list.",
+        "empty": "Empty state with 'You're all caught up.'",
+        "error": "Readable error message with a 'Retry' button."
+      },
+      "layout": "List rows with leading avatars. Each row displays a title, description, and an outlined status pill (18% opacity background tint, 30% opacity border). Hairline dividers between rows."
+    }
+  ],
+  "images": {
+    "hero_background": {
+      "url": "https://images.unsplash.com/photo-1462556791646-c201b8241a94?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGxpZ2h0JTIwYmx1ZSUyMGdsYXNzJTIwb2ZmaWNlJTIwYXJjaGl0ZWN0dXJlfGVufDB8fHx8MTc5MTYxMzAzOXww&ixlib=rb-4.1.0&q=85",
+      "dark": "https://images.unsplash.com/photo-1462556791646-c201b8241a94?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGxpZ2h0JTIwYmx1ZSUyMGdsYXNzJTIwb2ZmaWNlJTIwYXJjaGl0ZWN0dXJlfGVufDB8fHx8MTc5MTYxMzAzOXww&ixlib=rb-4.1.0&q=85",
+      "alt": "abstract light blue glass office architecture"
+    },
+    "empty_state_office": {
+      "url": "https://images.unsplash.com/photo-1572521165329-b197f9ea3da6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzh8MHwxfHNlYXJjaHwxfHxlbXB0eSUyMHN0YXRlJTIwbW9kZXJuJTIwaWxsdXN0cmF0aW9uJTIwb2ZmaWNlfGVufDB8fHx8MTc5MTYxMzAzOXww&ixlib=rb-4.1.0&q=85",
+      "dark": "https://images.unsplash.com/photo-1572521165329-b197f9ea3da6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzh8MHwxfHNlYXJjaHwxfHxlbXB0eSUyMHN0YXRlJTIwbW9kZXJuJTIwaWxsdXN0cmF0aW9uJTIwb2ZmaWNlfGVufDB8fHx8MTc5MTYxMzAzOXww&ixlib=rb-4.1.0&q=85",
+      "alt": "empty state modern illustration office"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Strictly adhere to the 1 iOS-Native Clean personality but modified for B2B SaaS density.",
+    "Implement tabular numbers using CSS 'font-variant-numeric: tabular-nums' or Expo equivalent for all financial values, telemetry, timestamps, and metric tiles.",
+    "Status Tags and Pills MUST be implemented as outlined badges (18% background opacity tint, 30% border opacity of the status color) to maintain a refined, non-competitive aesthetic.",
+    "Segmented Controls (e.g., P/A/L/E in Attendance) should have equal-width segments in a pill-shaped container. Active state gets an accent-tinted fill; inactive states remain neutral.",
+    "Timeline Rail (My Day / Schedule) should be a stable vertical list where the rail acts as a continuous decorative anchor. Each row stacks a headline, a status pill, a description, and a relative timestamp.",
+    "Ensure ALL numerical data arrays use monospaced or tabular proportional sans numerals.",
+    "Borders MUST be hairline (0.5pt to 1pt max) using the defined border colors. Maintain subtle shadow elevation rather than heavy borders for cards.",
+    "Avatars must fallback to initials centered in a tinted square/circle if no real PNG logo/photo is provided.",
+    "Ensure full Dark Mode support matching src/theme.ts, translating light backgrounds to deep near-blacks (#0D0E12) and inversing text/elevations properly without heavy contrast fatigue.",
+    "No emojis allowed anywhere in the system UI. No decorative charts or gradients. Maintain a cool neutral background with crisp light blue accents."
+  ]
+}
