@@ -36,16 +36,17 @@ export default function Inbox() {
   const [reason, setReason] = useState("");
 
   const { data, isLoading, isError, refetch, isRefetching } = useQuery({
-    queryKey: ["inbox"],
+    queryKey: ["inbox", user?.id],
     queryFn: () => apiFetch<{ items: any[]; can_decide: boolean }>("/inbox"),
+    enabled: !!user,
   });
 
   const decide = useMutation({
     mutationFn: (v: { id: string; decision: string; reason?: string }) =>
       apiFetch(`/requests/${v.id}/decision`, { method: "POST", body: { decision: v.decision, reason: v.reason } }),
     onSuccess: (_d, v) => {
-      qc.invalidateQueries({ queryKey: ["inbox"] });
-      qc.invalidateQueries({ queryKey: ["my-day"] });
+      qc.invalidateQueries({ queryKey: ["inbox", user?.id] });
+      qc.invalidateQueries({ queryKey: ["my-day", user?.id] });
       qc.invalidateQueries({ queryKey: ["notifications"] });
       toast(v.decision === "Rejected" ? "Rejected. The requester has been notified." : "Approved. The requester has been notified.");
     },
@@ -66,7 +67,7 @@ export default function Inbox() {
   const header = (
     <AppHeader
       title={isTeacher ? "My requests" : "Inbox"}
-      subtitle={isTeacher ? "Leave and corrections" : "Approvals and tasks"}
+      subtitle={isTeacher ? "Leave, plans, and claims" : "Approvals and tasks"}
       right={<HeaderBell />}
     />
   );
@@ -144,10 +145,10 @@ export default function Inbox() {
       </ScrollView>
 
       <Modal visible={!!rejecting} transparent animationType="fade" onRequestClose={() => setRejecting(null)}>
+        <View style={styles.sheetWrap}>
         <Pressable style={styles.scrim} onPress={() => setRejecting(null)} />
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.sheetWrap}
           pointerEvents="box-none"
         >
           <View style={styles.sheet} testID="reject-sheet">
@@ -168,6 +169,7 @@ export default function Inbox() {
             </View>
           </View>
         </KeyboardAvoidingView>
+        </View>
       </Modal>
     </View>
   );

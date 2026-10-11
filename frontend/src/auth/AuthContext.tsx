@@ -62,9 +62,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const applyLogin = async (resp: { token: string; user: AppUser }) => {
     await persistToken(resp.token);
+    await qc.cancelQueries();
+    qc.clear();
     setUser(resp.user);
-    await qc.invalidateQueries();
-    await qc.refetchQueries();
   };
 
   const login = async (email: string, password: string) => {

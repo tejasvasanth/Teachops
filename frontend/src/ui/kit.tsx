@@ -48,6 +48,7 @@ export function StatusPill({
       testID={testID}
       style={{
         alignSelf: "flex-start",
+        maxWidth: "100%",
         backgroundColor: hexA(c, 0.14),
         borderColor: hexA(c, 0.32),
         borderWidth: 1,
@@ -197,11 +198,13 @@ export function Segmented<T extends string>({
 }
 
 const ATT = [
-  { code: "P", color: "success" as const },
-  { code: "A", color: "error" as const },
-  { code: "L", color: "warning" as const },
-  { code: "E", color: "brand" as const },
+  { code: "P", label: "Present", color: "success" as const },
+  { code: "A", label: "Absent", color: "error" as const },
+  { code: "L", label: "Late", color: "warning" as const },
+  { code: "E", label: "Excused", color: "brand" as const },
 ];
+
+export const ATTENDANCE_LEGEND = ATT.map((a) => ({ code: a.code, label: a.label }));
 
 export function AttendanceControl({
   value,
@@ -225,6 +228,7 @@ export function AttendanceControl({
           <Pressable
             key={a.code}
             testID={testID ? `${testID}-${a.code}` : undefined}
+            accessibilityLabel={a.label}
             disabled={disabled}
             onPress={() => onChange(a.code)}
             style={[

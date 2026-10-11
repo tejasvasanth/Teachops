@@ -10,6 +10,14 @@ export function setAuthToken(token: string | null) {
   authToken = token;
 }
 
+export function apiUrl(path: string) {
+  return `${BASE}${path}`;
+}
+
+export function authHeader(): Record<string, string> {
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {};
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {

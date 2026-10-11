@@ -3,10 +3,15 @@
 // the exported `fonts` object (custom fonts need an explicit fontFamily, not
 // fontWeight).
 
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { Appearance, StyleSheet, useColorScheme } from "react-native";
 
+import { storage } from "@/src/utils/storage";
+
 export type ColorScheme = "light" | "dark";
+export type ThemePreference = ColorScheme | "system";
+
+const SCHEME_KEY = "teachops_color_scheme";
 
 export const fonts = {
   regular: "Geist-Regular",
@@ -92,12 +97,48 @@ export function setColorScheme(scheme: ColorScheme | null) {
   Appearance.setColorScheme?.(scheme ?? "unspecified");
 }
 
-setColorScheme?.(themes.dark ? null : defaultScheme);
+let preference: ThemePreference = "system";
+const listeners = new Set<() => void>();
 
-export function useTheme(): { scheme: ColorScheme; colors: ThemeColors } {
+function emitPreference() {
+  listeners.forEach((listener) => listener());
+}
+
+function subscribePreference(listener: () => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function applyNativeScheme(next: ThemePreference) {
+  Appearance.setColorScheme?.(next === "system" ? "unspecified" : next);
+}
+
+export function getThemePreference(): ThemePreference {
+  return preference;
+}
+
+export async function hydrateThemePreference() {
+  const saved = await storage.getItem(SCHEME_KEY, "system");
+  if (saved === "light" || saved === "dark" || saved === "system") {
+    preference = saved;
+    applyNativeScheme(saved);
+    emitPreference();
+  }
+}
+
+export function setThemePreference(next: ThemePreference) {
+  preference = next;
+  applyNativeScheme(next);
+  emitPreference();
+  void storage.setItem(SCHEME_KEY, next);
+}
+
+export function useTheme(): { scheme: ColorScheme; colors: ThemeColors; preference: ThemePreference } {
   const system = useColorScheme();
-  const scheme: ColorScheme = system && themes[system] ? system : defaultScheme;
-  return { scheme, colors: themes[scheme] ?? themes.light };
+  const preference = useSyncExternalStore(subscribePreference, getThemePreference, getThemePreference);
+  const scheme: ColorScheme =
+    preference === "system" ? (system === "dark" ? "dark" : "light") : preference;
+  return { scheme, preference, colors: themes[scheme] ?? themes.light };
 }
 
 export function makeStyles<T extends StyleSheet.NamedStyles<T> | StyleSheet.NamedStyles<any>>(

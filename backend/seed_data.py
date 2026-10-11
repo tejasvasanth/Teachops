@@ -162,7 +162,9 @@ async def run(db, hash_pw):
         await db.batches.insert_one({
             "id": bid, "organisation_id": org_id, "code": code, "programme": prog,
             "centre_id": centres[centre], "centre_name": centre, "room": room,
-            "teacher_id": anjali_id, "created_at": now_iso(),
+            "teacher_id": anjali_id,
+            "class_teacher_id": anjali_id if code == "6A" else None,
+            "created_at": now_iso(),
         })
         for s in enr:
             await db.enrolments.insert_one({"id": nid(), "batch_id": bid, "student_id": s, "organisation_id": org_id})
@@ -194,7 +196,9 @@ async def run(db, hash_pw):
         await db.batches.insert_one({
             "id": bid, "organisation_id": org_id, "code": code, "programme": prog,
             "centre_id": centres[centre], "centre_name": centre, "room": room,
-            "teacher_id": tid, "created_at": now_iso(),
+            "teacher_id": tid,
+            "class_teacher_id": tid if code in {"6B", "6C", "6D", "7A", "7C", "8A", "8C", "8D"} else None,
+            "created_at": now_iso(),
         })
         for s in enr:
             await db.enrolments.insert_one({"id": nid(), "batch_id": bid, "student_id": s, "organisation_id": org_id})

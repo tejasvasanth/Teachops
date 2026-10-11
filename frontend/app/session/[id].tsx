@@ -5,10 +5,13 @@ import { Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useAuth } from "@/src/auth/AuthContext";
 import { apiFetch } from "@/src/lib/api";
+import { useGoBack } from "@/src/ui/app-chrome";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import {
   AppHeader,
+  ATTENDANCE_LEGEND,
   AttendanceControl,
   Avatar,
   PrimaryButton,
@@ -25,14 +28,17 @@ export default function Session() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const styles = useStyles();
   const { colors } = useTheme();
+  const goBack = useGoBack();
   const router = useRouter();
   const { toast } = useToast();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
+  const { user } = useAuth();
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["session", id],
+    queryKey: ["session", user?.id, id],
     queryFn: () => apiFetch<any>(`/sessions/${id}`),
+    enabled: !!user && !!id,
   });
 
   const [marks, setMarks] = useState<Record<string, string>>({});
@@ -49,7 +55,9 @@ export default function Session() {
     }
   }, [data]);
 
-  const locked = data && LOCKED.includes(data.record_status);
+  const submitted = Boolean(data && LOCKED.includes(data.record_status));
+  const viewOnly = data?.editable === false;
+  const locked = submitted || viewOnly;
 
   const save = useMutation({
     mutationFn: (payload: { marks: Record<string, string>; notes: string }) =>
@@ -76,16 +84,16 @@ export default function Session() {
       return apiFetch(`/sessions/${id}/submit`, { method: "POST" });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["session", id] });
-      qc.invalidateQueries({ queryKey: ["my-day"] });
-      qc.invalidateQueries({ queryKey: ["schedule"] });
+      qc.invalidateQueries({ queryKey: ["session", user?.id, id] });
+      qc.invalidateQueries({ queryKey: ["my-day", user?.id] });
+      qc.invalidateQueries({ queryKey: ["schedule", user?.id] });
       toast("Session record submitted");
-      router.back();
+      goBack();
     },
     onError: (e: any) => toast(e?.message ?? "Could not submit"),
   });
 
-  const header = <AppHeader title={data?.session?.title ?? "Session"} subtitle={data?.session?.where} onBack={() => router.back()} />;
+  const header = <AppHeader title={data?.session?.title ?? "Session"} subtitle={data?.session?.where} onBack={goBack} />;
 
   if (isLoading) {
     return (
@@ -133,8 +141,11 @@ export default function Session() {
           <Text style={styles.counter}>
             {markCount} of {total} marked
           </Text>
-          <StatusPill label={data.record_status} kind={locked ? "ok" : "warn"} />
+          <StatusPill label={data.record_status} kind={submitted ? "ok" : "warn"} />
         </View>
+        <Text style={styles.legend}>
+          {ATTENDANCE_LEGEND.map((a) => `${a.code} ${a.label}`).join("   ·   ")}
+        </Text>
 
         <View style={styles.list}>
           {data.roster.map((s: any, i: number) => (
@@ -157,6 +168,13 @@ export default function Session() {
           <SecondaryButton title="Mark all present" testID="mark-all" onPress={markAll} style={{ marginTop: 12 }} />
         ) : null}
 
+        <SecondaryButton
+          title="Lesson plan"
+          testID="open-lesson-plan"
+          onPress={() => router.push({ pathname: "/lesson/[id]", params: { id: id! } })}
+          style={{ marginTop: 12 }}
+        />
+
         <SectionHeader title="What was covered" />
         <TextInput
           testID="session-notes"
@@ -176,7 +194,11 @@ export default function Session() {
 
       <View style={[styles.foot, { paddingBottom: insets.bottom + 12 }]}>
         <Text style={styles.footText}>
-          {locked ? "Submitted. Request a correction to edit." : savedLabel}
+          {submitted
+            ? "Submitted. Request a correction to edit."
+            : viewOnly
+              ? "View only. The session teacher marks this register."
+              : savedLabel}
         </Text>
         <PrimaryButton
           title="Submit record"
@@ -197,6 +219,7 @@ const useStyles = makeStyles((colors) => ({
   statusRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
   sectionTitle: { color: colors.onSurface, fontFamily: fonts.semibold, fontSize: 15 },
   counter: { flex: 1, color: colors.muted, fontFamily: fonts.regular, fontSize: 13, fontVariant: ["tabular-nums"] },
+  legend: { color: colors.muted, fontFamily: fonts.regular, fontSize: 12.5, marginBottom: 10 },
   list: {
     backgroundColor: colors.surface,
     borderWidth: 1,

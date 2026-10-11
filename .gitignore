@@ -31,7 +31,9 @@ dist/
 dist
 
 # Environment files (comprehensive coverage)
-
+.env
+.env.*
+!.env.example
 *token.json*
 *credentials.json*
 
@@ -51,6 +53,10 @@ __pycache__/
 *pyc*
 venv/
 .venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+backend/.tmp/
 
 # Development tools
 chainlit.md
@@ -80,3 +86,11 @@ memory/test_credentials.md
 
 # Mobile development
 android-sdk/
+.expo/
+.metro-cache/
+web-build/
+
+# Local databases and editor junk
+*.sqlite
+*.sqlite3
+Thumbs.db

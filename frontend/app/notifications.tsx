@@ -1,31 +1,41 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
+import { useAuth } from "@/src/auth/AuthContext";
 import { apiFetch } from "@/src/lib/api";
 import { fonts, makeStyles } from "@/src/theme";
+import { useGoBack } from "@/src/ui/app-chrome";
 import { AppHeader, StateView, StatusPill } from "@/src/ui/kit";
 
 export default function Notifications() {
   const styles = useStyles();
   const router = useRouter();
+  const goBack = useGoBack();
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const armed = useRef(false);
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["notifications"],
+    queryKey: ["notifications", user?.id],
     queryFn: () => apiFetch<{ items: any[] }>("/notifications"),
+    enabled: !!user,
   });
 
   const readAll = useMutation({
     mutationFn: () => apiFetch("/notifications/read-all", { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", user?.id] }),
   });
 
-  // Mark all read on leaving the screen.
+  // Mark all read when the user actually leaves, not on the dev double-mount.
   useEffect(() => {
+    const arm = setTimeout(() => {
+      armed.current = true;
+    }, 400);
     return () => {
-      readAll.mutate();
+      clearTimeout(arm);
+      if (armed.current) readAll.mutate();
     };
   }, []);
 
@@ -33,10 +43,10 @@ export default function Notifications() {
     if (action === "pay") router.replace("/(tabs)/me");
     else if (action === "chat") router.replace("/(tabs)/chat");
     else if (action === "inbox") router.replace("/(tabs)/inbox");
-    else router.back();
+    else goBack();
   };
 
-  const header = <AppHeader title="Notifications" subtitle="Salary, approvals, replies" onBack={() => router.back()} />;
+  const header = <AppHeader title="Notifications" subtitle="Salary, approvals, replies" onBack={goBack} />;
 
   if (isLoading) {
     return (

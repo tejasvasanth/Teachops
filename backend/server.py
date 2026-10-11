@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone, date
 import jwt
 import bcrypt
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -106,6 +107,51 @@ def initials(name: str) -> str:
     return (parts[0][0] + parts[-1][0]).upper()
 
 
+def fmt_long_date(dt: datetime) -> str:
+    # %-d is glibc-only and raises ValueError on Windows.
+    return f"{dt.strftime('%A')}, {dt.day} {dt.strftime('%B')}"
+
+
+def fmt_short_date(d: date) -> str:
+    return f"{d.day} {d.strftime('%b')}"
+
+
+def leave_span(days: list[date]) -> str:
+    ordered = sorted(set(days))
+    if not ordered:
+        return ""
+    ranges: list[tuple[date, date]] = []
+    start = prev = ordered[0]
+    for day in ordered[1:]:
+        if day == prev + timedelta(days=1):
+            prev = day
+            continue
+        ranges.append((start, prev))
+        start = prev = day
+    ranges.append((start, prev))
+    parts = []
+    for first, last in ranges:
+        if first == last:
+            parts.append(fmt_short_date(first))
+        else:
+            parts.append(f"{fmt_short_date(first)} to {fmt_short_date(last)}")
+    label = ", ".join(parts)
+    if len(ordered) > 1 and len(label) > 48:
+        return f"{len(ordered)} days, {fmt_short_date(ordered[0])} to {fmt_short_date(ordered[-1])}"
+    return label
+
+
+def greeting_for(now: datetime, first_name: str) -> str:
+    hour = now.hour
+    if hour < 12:
+        hello = "Good morning"
+    elif hour < 17:
+        hello = "Good afternoon"
+    else:
+        hello = "Good evening"
+    return f"{hello}, {first_name}"
+
+
 # --------------------------------------------------------------------------- #
 # models
 # --------------------------------------------------------------------------- #
@@ -130,9 +176,25 @@ class SaveAttendanceIn(BaseModel):
 
 class LeaveRequestIn(BaseModel):
     leave_type: str
-    start_date: str
-    end_date: str
+    start_date: str | None = None
+    end_date: str | None = None
+    dates: list[str] | None = None
     reason: str
+
+
+class LessonPlanIn(BaseModel):
+    objective: str = ""
+    activities: str = ""
+    materials: str = ""
+    homework: str = ""
+
+
+class ExpenseIn(BaseModel):
+    travel_date: str
+    origin: str
+    destination: str
+    amount: int
+    purpose: str
 
 
 class DecisionIn(BaseModel):
@@ -259,20 +321,54 @@ async def my_day(user: dict = Depends(get_current_user)):
             {"teacher_id": user["id"], "record_status": "Attendance submitted"}, {"_id": 0}
         )
         if rec:
-            pending.append({"title": f"Session note for {rec['title']}", "sub": "Attendance submitted", "tag": "Due today", "kind": "warn"})
+            pending.append({
+                "title": f"Session note for {rec['title']}",
+                "sub": "Attendance submitted",
+                "tag": "Due today",
+                "kind": "warn",
+                "session_id": rec["id"],
+            })
         follow = await db.students.find_one({"follow_up": True, "organisation_id": user["organisation_id"]}, {"_id": 0})
         if follow:
-            pending.append({"title": f"Follow up with {follow['guardian_name']}", "sub": f"{follow['name']} · absent twice this week", "tag": "Open", "kind": "n"})
+            enr = await db.enrolments.find_one({"student_id": follow["id"], "organisation_id": user["organisation_id"]}, {"_id": 0})
+            follow_session = None
+            if enr:
+                follow_session = await db.sessions.find_one(
+                    {"batch_id": enr["batch_id"], "teacher_id": user["id"], "date": today},
+                    {"_id": 0, "id": 1},
+                )
+            pending.append({
+                "title": f"Follow up with {follow['guardian_name']}",
+                "sub": f"{follow['name']} · absent twice this week",
+                "tag": "Open",
+                "kind": "n",
+                "session_id": follow_session["id"] if follow_session else None,
+            })
+
+        classes = []
+        async for b in db.batches.find(
+            {"organisation_id": user["organisation_id"], "class_teacher_id": user["id"]},
+            {"_id": 0, "id": 1, "code": 1, "programme": 1, "centre_name": 1},
+        ):
+            students = await db.enrolments.count_documents({"batch_id": b["id"]})
+            classes.append({
+                "id": b["id"],
+                "code": b["code"],
+                "programme": b["programme"],
+                "centre": b["centre_name"],
+                "students": students,
+            })
 
         return {
             "role": "teacher",
-            "greeting": f"Good morning, {user['name'].split()[0]}",
-            "date_label": datetime.now(IST).strftime("%A, %-d %B"),
+            "greeting": greeting_for(datetime.now(IST), user["name"].split()[0]),
+            "date_label": fmt_long_date(datetime.now(IST)),
             "next": next_card,
             "timeline": timeline,
             "pending": pending,
             "leave": bal,
             "pay": payslip,
+            "classes": classes,
         }
 
     org = user["organisation_id"]
@@ -302,7 +398,7 @@ async def my_day(user: dict = Depends(get_current_user)):
     return {
         "role": role,
         "greeting": user.get("centre_name") if is_coord else user.get("organisation_name"),
-        "date_label": datetime.now(IST).strftime("%A, %-d %B"),
+        "date_label": fmt_long_date(datetime.now(IST)),
         "metrics": metrics,
         "timeline": today_sessions,
     }
@@ -336,13 +432,25 @@ async def schedule(user: dict = Depends(get_current_user)):
 # --------------------------------------------------------------------------- #
 # Session / attendance workspace
 # --------------------------------------------------------------------------- #
-@api.get("/sessions/{sid}")
-async def get_session(sid: str, user: dict = Depends(get_current_user)):
+async def _visible_session(sid: str, user: dict) -> tuple[dict, bool]:
     s = await db.sessions.find_one({"id": sid, "organisation_id": user["organisation_id"]}, {"_id": 0})
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
-    if user["role"] == "teacher" and s.get("teacher_id") != user["id"]:
+    batch = await db.batches.find_one({"id": s["batch_id"]}, {"_id": 0, "class_teacher_id": 1})
+    teaches = s.get("teacher_id") == user["id"]
+    class_teacher = bool(batch and batch.get("class_teacher_id") == user["id"])
+    if user["role"] == "teacher" and not teaches and not class_teacher:
         raise HTTPException(status_code=403, detail="Not your session")
+    return s, user["role"] != "teacher" or teaches
+
+
+def _blank_plan() -> dict:
+    return {"objective": "", "activities": "", "materials": "", "homework": "", "status": "Draft", "review_note": ""}
+
+
+@api.get("/sessions/{sid}")
+async def get_session(sid: str, user: dict = Depends(get_current_user)):
+    s, editable = await _visible_session(sid, user)
     enrolled = db.enrolments.find({"batch_id": s["batch_id"]}, {"_id": 0})
     roster = []
     async for e in enrolled:
@@ -358,6 +466,167 @@ async def get_session(sid: str, user: dict = Depends(get_current_user)):
         "marks": att.get("marks", {}),
         "notes": att.get("notes", ""),
         "history": s.get("history", []),
+        "editable": editable,
+    }
+
+
+@api.get("/sessions/{sid}/lesson")
+async def get_lesson(sid: str, user: dict = Depends(get_current_user)):
+    s, editable = await _visible_session(sid, user)
+    plan = await db.lesson_plans.find_one({"session_id": sid}, {"_id": 0}) or _blank_plan()
+    return {"session": _session_card(s), "plan": plan, "editable": editable and plan.get("status") in ("Draft", "Changes requested")}
+
+
+@api.put("/sessions/{sid}/lesson")
+async def save_lesson(sid: str, body: LessonPlanIn, user: dict = Depends(get_current_user)):
+    s, editable = await _visible_session(sid, user)
+    if not editable:
+        raise HTTPException(status_code=403, detail="Only the session teacher can edit this plan")
+    existing = await db.lesson_plans.find_one({"session_id": sid}, {"_id": 0})
+    if existing and existing.get("status") in ("Submitted", "Approved"):
+        raise HTTPException(status_code=409, detail="This plan is locked until a coordinator asks for changes")
+    status = existing.get("status") if existing else "Draft"
+    if status not in ("Draft", "Changes requested"):
+        status = "Draft"
+    doc = {
+        "id": existing["id"] if existing else new_id(),
+        "organisation_id": user["organisation_id"],
+        "session_id": sid,
+        "teacher_id": s.get("teacher_id") or user["id"],
+        "title": s.get("title"),
+        "objective": body.objective.strip(),
+        "activities": body.activities.strip(),
+        "materials": body.materials.strip(),
+        "homework": body.homework.strip(),
+        "status": status,
+        "review_note": existing.get("review_note", "") if existing else "",
+        "updated_at": now_utc().isoformat(),
+    }
+    await db.lesson_plans.update_one({"session_id": sid}, {"$set": doc}, upsert=True)
+    return {"plan": doc, "editable": True}
+
+
+@api.post("/sessions/{sid}/lesson/submit")
+async def submit_lesson(sid: str, user: dict = Depends(get_current_user)):
+    s, editable = await _visible_session(sid, user)
+    if not editable:
+        raise HTTPException(status_code=403, detail="Only the session teacher can submit this plan")
+    plan = await db.lesson_plans.find_one({"session_id": sid}, {"_id": 0})
+    if not plan or not plan.get("objective") or not plan.get("activities"):
+        raise HTTPException(status_code=400, detail="Add an objective and the activities before submitting")
+    if plan.get("status") in ("Submitted", "Approved"):
+        raise HTTPException(status_code=409, detail="This plan is already with your coordinator")
+    reviewer = await _reviewer_for(user)
+    when = fmt_short_date(date.fromisoformat(s["date"])) if s.get("date") else ""
+    doc = {
+        "id": new_id(),
+        "organisation_id": user["organisation_id"],
+        "centre_id": s.get("centre_id") or user.get("centre_id"),
+        "kind": "Lesson plan",
+        "title": f"Lesson plan: {s.get('title')}",
+        "detail": f"{when} · {plan['objective'][:180]}",
+        "requester_id": user["id"],
+        "requester_name": user["name"],
+        "requester_initials": initials(user["name"]),
+        "reviewer_name": reviewer["name"] if reviewer else "Administrator",
+        "status": "Pending",
+        "session_id": sid,
+        "lesson_id": plan["id"],
+        "created_at": now_utc().isoformat(),
+        "history": [{"at": now_utc().isoformat(), "by": user["name"], "what": "Submitted"}],
+    }
+    await db.approval_requests.insert_one(doc)
+    await db.lesson_plans.update_one({"session_id": sid}, {"$set": {"status": "Submitted", "review_note": ""}})
+    plan["status"] = "Submitted"
+    plan["review_note"] = ""
+    return {"plan": plan, "request_id": doc["id"]}
+
+
+MARK_LABEL = {"P": "Present", "A": "Absent", "L": "Late", "E": "Excused"}
+
+
+def _can_open_class(user: dict, batch: dict) -> bool:
+    if user["role"] in ("administrator", "owner"):
+        return batch.get("organisation_id") == user["organisation_id"]
+    if user["role"] == "coordinator":
+        return batch.get("centre_id") == user.get("centre_id")
+    return batch.get("class_teacher_id") == user["id"]
+
+
+@api.get("/classes/{bid}")
+async def get_class(bid: str, user: dict = Depends(get_current_user)):
+    batch = await db.batches.find_one({"id": bid, "organisation_id": user["organisation_id"]}, {"_id": 0})
+    if not batch:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if not _can_open_class(user, batch):
+        raise HTTPException(status_code=403, detail="Not your class")
+
+    today = _today_str()
+    week = await _week_dates()
+    roster = []
+    async for e in db.enrolments.find({"batch_id": bid}, {"_id": 0}):
+        st = await db.students.find_one({"id": e["student_id"]}, {"_id": 0})
+        if st:
+            roster.append(st)
+    roster.sort(key=lambda x: x["name"])
+
+    sessions = [
+        s
+        async for s in db.sessions.find(
+            {"batch_id": bid, "date": {"$in": week}},
+            {"_id": 0},
+        ).sort([("date", 1), ("start", 1)])
+    ]
+    marks_by_session: dict[str, dict] = {}
+    for s in sessions:
+        att = await db.student_attendance.find_one({"session_id": s["id"]}, {"_id": 0, "marks": 1})
+        marks_by_session[s["id"]] = (att or {}).get("marks", {})
+
+    students = []
+    absent_today = 0
+    unmarked_today = 0
+    today_sessions = [s for s in sessions if s["date"] == today]
+    for st in roster:
+        week_marks = []
+        today_code = None
+        for s in sessions:
+            code = marks_by_session.get(s["id"], {}).get(st["id"])
+            if not code:
+                continue
+            week_marks.append(code)
+            if s["date"] == today:
+                today_code = code
+        if today_sessions and today_code == "A":
+            absent_today += 1
+        if today_sessions and not today_code:
+            unmarked_today += 1
+        students.append({
+            "id": st["id"],
+            "name": st["name"],
+            "initials": initials(st["name"]),
+            "follow_up": bool(st.get("follow_up")),
+            "today": today_code,
+            "today_label": MARK_LABEL.get(today_code, "Not marked"),
+            "absent_this_week": week_marks.count("A"),
+            "late_this_week": week_marks.count("L"),
+        })
+
+    teacher = None
+    if batch.get("class_teacher_id"):
+        teacher = await db.users.find_one({"id": batch["class_teacher_id"]}, {"_id": 0, "name": 1})
+
+    return {
+        "id": batch["id"],
+        "code": batch["code"],
+        "programme": batch["programme"],
+        "centre": batch["centre_name"],
+        "room": batch.get("room"),
+        "class_teacher": teacher["name"] if teacher else None,
+        "students": students,
+        "absent_today": absent_today,
+        "unmarked_today": unmarked_today,
+        "has_class_today": bool(today_sessions),
+        "sessions": [_session_card(s) for s in sessions],
     }
 
 
@@ -424,33 +693,63 @@ async def inbox(user: dict = Depends(get_current_user)):
     return {"items": items, "can_decide": user["role"] in ("coordinator", "administrator", "owner")}
 
 
-@api.post("/requests/leave")
-async def create_leave(body: LeaveRequestIn, user: dict = Depends(get_current_user)):
+async def _reviewer_for(user: dict):
+    if user["role"] != "administrator":
+        found = await db.users.find_one(
+            {
+                "organisation_id": user["organisation_id"],
+                "role": "coordinator",
+                "centre_id": user.get("centre_id"),
+                "id": {"$ne": user["id"]},
+            },
+            {"_id": 0},
+        )
+        if found:
+            return found
+    return await db.users.find_one(
+        {"organisation_id": user["organisation_id"], "role": "administrator", "id": {"$ne": user["id"]}},
+        {"_id": 0},
+    )
+
+
+def _leave_days(body: LeaveRequestIn) -> list[date]:
+    if body.dates:
+        try:
+            days = [date.fromisoformat(d) for d in body.dates]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Choose valid leave dates")
+        if not days:
+            raise HTTPException(status_code=400, detail="Select at least one day")
+        return sorted(set(days))
+    if not body.start_date or not body.end_date:
+        raise HTTPException(status_code=400, detail="Select at least one day")
     if body.end_date < body.start_date:
         raise HTTPException(status_code=400, detail="End date must be on or after start date")
-    reviewer = await db.users.find_one(
-        {"organisation_id": user["organisation_id"], "role": "coordinator", "centre_id": user.get("centre_id")},
-        {"_id": 0},
-    ) or await db.users.find_one({"organisation_id": user["organisation_id"], "role": "administrator"}, {"_id": 0})
+    start = date.fromisoformat(body.start_date)
+    end = date.fromisoformat(body.end_date)
+    return [start + timedelta(days=i) for i in range((end - start).days + 1)]
 
-    def fmt(d):
-        return date.fromisoformat(d).strftime("%-d %b")
 
-    span = fmt(body.start_date) if body.start_date == body.end_date else f"{fmt(body.start_date)} to {fmt(body.end_date)}"
+@api.post("/requests/leave")
+async def create_leave(body: LeaveRequestIn, user: dict = Depends(get_current_user)):
+    days = _leave_days(body)
+    reviewer = await _reviewer_for(user)
+    iso_days = [d.isoformat() for d in days]
     doc = {
         "id": new_id(),
         "organisation_id": user["organisation_id"],
         "centre_id": user.get("centre_id"),
         "kind": "Leave",
-        "title": f"{body.leave_type} leave, {span}",
+        "title": f"{body.leave_type} leave, {leave_span(days)}",
         "detail": body.reason,
         "requester_id": user["id"],
         "requester_name": user["name"],
         "requester_initials": initials(user["name"]),
         "reviewer_name": reviewer["name"] if reviewer else "Administrator",
         "status": "Pending",
-        "start_date": body.start_date,
-        "end_date": body.end_date,
+        "start_date": iso_days[0],
+        "end_date": iso_days[-1],
+        "dates": iso_days,
         "leave_type": body.leave_type,
         "created_at": now_utc().isoformat(),
         "history": [{"at": now_utc().isoformat(), "by": user["name"], "what": "Requested"}],
@@ -467,6 +766,8 @@ async def decide(rid: str, body: DecisionIn, user: dict = Depends(get_current_us
     req = await db.approval_requests.find_one({"id": rid, "organisation_id": user["organisation_id"]})
     if not req:
         raise HTTPException(status_code=404, detail="Request not found")
+    if user["role"] == "coordinator" and user.get("centre_id") and req.get("centre_id") not in (None, user["centre_id"]):
+        raise HTTPException(status_code=403, detail="Not your centre")
     if req["status"] != "Pending":
         raise HTTPException(status_code=409, detail="Already processed")
     if body.decision == "Rejected" and not (body.reason and body.reason.strip()):
@@ -477,6 +778,12 @@ async def decide(rid: str, body: DecisionIn, user: dict = Depends(get_current_us
         {"id": rid},
         {"$set": {"status": body.decision, "decided_by": user["name"], "decided_at": now_utc().isoformat(), "decision_reason": body.reason, "history": hist}},
     )
+    if req.get("lesson_id"):
+        plan_status = "Approved" if body.decision == "Approved" else "Changes requested"
+        await db.lesson_plans.update_one(
+            {"id": req["lesson_id"]},
+            {"$set": {"status": plan_status, "review_note": (body.reason or "").strip()}},
+        )
     await db.notifications.insert_one({
         "id": new_id(),
         "user_id": req["requester_id"],
@@ -554,6 +861,7 @@ async def post_message(cid: str, body: MessageIn, user: dict = Depends(get_curre
 async def compose(body: ComposeIn, user: dict = Depends(get_current_user)):
     if not body.subject.strip() or not body.text.strip():
         raise HTTPException(status_code=400, detail="Add a subject and a message")
+    member_ids = await _compose_members(user, body.to)
     cid = new_id()
     await db.conversations.insert_one({
         "id": cid,
@@ -561,8 +869,8 @@ async def compose(body: ComposeIn, user: dict = Depends(get_current_user)):
         "title": body.subject.strip(),
         "subtitle": body.to,
         "official": body.official,
-        "type": "direct",
-        "member_ids": [user["id"]],
+        "type": "group" if len(member_ids) > 2 else "direct",
+        "member_ids": member_ids,
         "created_by": user["id"],
         "created_at": now_utc().isoformat(),
         "updated_at": now_utc().isoformat(),
@@ -576,7 +884,47 @@ async def compose(body: ComposeIn, user: dict = Depends(get_current_user)):
         "read_by": [user["id"]],
         "created_at": now_utc().isoformat(),
     })
+    for mid in member_ids:
+        if mid == user["id"]:
+            continue
+        await db.notifications.insert_one({
+            "id": new_id(),
+            "user_id": mid,
+            "title": f"New message: {body.subject.strip()}",
+            "detail": f"{user['name']} · {body.text.strip()[:80]}",
+            "unread": True,
+            "action": "chat",
+            "created_at": now_utc().isoformat(),
+        })
     return {"ok": True, "id": cid}
+
+
+async def _compose_members(user: dict, to: str) -> list[str]:
+    """Add people the composer actually addressed.
+
+    Match the full name (or the administration office / a centre group).
+    A partial label that does not contain a full name stays a private note
+    so the sender is the only member.
+    """
+    ids = [user["id"]]
+    needle = (to or "").lower()
+    centre_group = "centre" in needle and "group" in needle
+    cur = db.users.find(
+        {"organisation_id": user["organisation_id"]},
+        {"_id": 0, "id": 1, "name": 1, "role": 1, "centre_name": 1},
+    )
+    async for other in cur:
+        if other["id"] in ids:
+            continue
+        name = (other.get("name") or "").lower()
+        centre = (other.get("centre_name") or "").lower()
+        if name and name in needle:
+            ids.append(other["id"])
+        elif "administration" in needle and other.get("role") == "administrator":
+            ids.append(other["id"])
+        elif centre_group and centre and centre in needle:
+            ids.append(other["id"])
+    return ids
 
 
 def _reltime(iso: str) -> str:
@@ -617,14 +965,123 @@ async def pay(user: dict = Depends(get_current_user)):
     return {"items": [p async for p in cur]}
 
 
-@api.get("/pay/{pid}")
-async def pay_detail(pid: str, user: dict = Depends(get_current_user)):
+async def _payslip_for(pid: str, user: dict) -> dict:
     p = await db.payslips.find_one({"id": pid, "organisation_id": user["organisation_id"]}, {"_id": 0})
     if not p:
         raise HTTPException(status_code=404, detail="Statement not found")
     if user["role"] == "teacher" and p["teacher_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Not your statement")
     return p
+
+
+def _pdf_escape(text: str) -> str:
+    raw = str(text).replace("₹", "Rs ").encode("latin-1", "replace").decode("latin-1")
+    return raw.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def statement_pdf(p: dict) -> bytes:
+    rows = [
+        "TeachOps salary statement",
+        p.get("teacher_name") or "",
+        p.get("period") or "",
+        "",
+        f"Net payable  {str(p.get('net_display', '')).replace('₹', 'Rs ')}",
+        f"Paid {p.get('paid_on', '')}    Bank ref {p.get('reference', '')}",
+        "",
+        "Calculation",
+    ]
+    for line in p.get("lines") or []:
+        amount = str(line.get("amount", "")).replace("₹", "")
+        rows.append(f"{line.get('label', '')}    Rs {amount}")
+    rows += ["", "Payment status is recorded by finance. TeachOps does not transfer money.", "Demo statement."]
+    commands = ["BT", "/F1 12 Tf", "50 780 Td", "16 TL"]
+    for row in rows:
+        commands.append(f"({_pdf_escape(row)}) Tj")
+        commands.append("T*")
+    commands.append("ET")
+    stream = "\n".join(commands).encode("latin-1")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for i, obj in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode()
+    out += b"0000000000 65535 f \n"
+    for off in offsets[1:]:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode()
+    return bytes(out)
+
+
+@api.get("/pay/{pid}")
+async def pay_detail(pid: str, user: dict = Depends(get_current_user)):
+    return await _payslip_for(pid, user)
+
+
+@api.get("/pay/{pid}/pdf")
+async def pay_pdf(pid: str, user: dict = Depends(get_current_user)):
+    p = await _payslip_for(pid, user)
+    filename = f"TeachOps-{(p.get('period') or 'statement').replace(' ', '-')}.pdf"
+    return Response(
+        content=statement_pdf(p),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@api.get("/expenses")
+async def list_expenses(user: dict = Depends(get_current_user)):
+    cur = db.approval_requests.find(
+        {"requester_id": user["id"], "kind": "Expense"},
+        {"_id": 0},
+    ).sort("created_at", -1)
+    return {"items": [r async for r in cur]}
+
+
+@api.post("/requests/expense")
+async def create_expense(body: ExpenseIn, user: dict = Depends(get_current_user)):
+    origin = body.origin.strip()
+    destination = body.destination.strip()
+    purpose = body.purpose.strip()
+    if not origin or not destination or not purpose:
+        raise HTTPException(status_code=400, detail="Add the route and a short purpose")
+    if body.amount < 1 or body.amount > 50000:
+        raise HTTPException(status_code=400, detail="Enter an amount between 1 and 50,000")
+    try:
+        day = date.fromisoformat(body.travel_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Choose a travel date")
+    if day > datetime.now(IST).date():
+        raise HTTPException(status_code=400, detail="Travel date cannot be in the future")
+    reviewer = await _reviewer_for(user)
+    doc = {
+        "id": new_id(),
+        "organisation_id": user["organisation_id"],
+        "centre_id": user.get("centre_id"),
+        "kind": "Expense",
+        "title": f"Travel claim, ₹{body.amount:,}",
+        "detail": f"{fmt_short_date(day)} · {origin} to {destination} · {purpose}",
+        "requester_id": user["id"],
+        "requester_name": user["name"],
+        "requester_initials": initials(user["name"]),
+        "reviewer_name": reviewer["name"] if reviewer else "Administrator",
+        "status": "Pending",
+        "amount": body.amount,
+        "travel_date": body.travel_date,
+        "created_at": now_utc().isoformat(),
+        "history": [{"at": now_utc().isoformat(), "by": user["name"], "what": "Submitted"}],
+    }
+    await db.approval_requests.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
 
 
 @api.get("/leave/balances")
@@ -655,7 +1112,7 @@ app.include_router(api)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origin_regex=".*",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -664,6 +1121,33 @@ app.add_middleware(
 # --------------------------------------------------------------------------- #
 # Seed
 # --------------------------------------------------------------------------- #
+CLASS_TEACHERS = {
+    "6A": "Anjali Pillai",
+    "6B": "Lakshmi Raman",
+    "6C": "Ramesh Gopal",
+    "6D": "Priya Shankar",
+    "7A": "Divya Menon",
+    "7C": "Deepa Nair",
+    "8A": "Karthik Iyer",
+    "8C": "Sneha Rao",
+    "8D": "Gopal Varma",
+}
+
+
+async def ensure_class_teachers():
+    for code, name in CLASS_TEACHERS.items():
+        teacher = await db.users.find_one(
+            {"name": name, "role": "teacher"},
+            {"_id": 0, "id": 1, "organisation_id": 1},
+        )
+        if not teacher:
+            continue
+        await db.batches.update_many(
+            {"code": code, "organisation_id": teacher["organisation_id"]},
+            {"$set": {"class_teacher_id": teacher["id"]}},
+        )
+
+
 @app.on_event("startup")
 async def startup():
     await db.users.create_index("email", unique=True)
@@ -671,11 +1155,12 @@ async def startup():
     existing = await db.organisations.find_one({"seed": True})
     if existing:
         logger.info("TeachOps demo seed already present")
-        return
-    logger.info("Seeding TeachOps demo data ...")
-    import seed_data
-    await seed_data.run(db, hash_pw)
-    logger.info("TeachOps demo seed complete")
+    else:
+        logger.info("Seeding TeachOps demo data ...")
+        import seed_data
+        await seed_data.run(db, hash_pw)
+        logger.info("TeachOps demo seed complete")
+    await ensure_class_teachers()
 
 
 @app.on_event("shutdown")

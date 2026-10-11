@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { ArrowRight } from "phosphor-react-native";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 
+import { useAuth } from "@/src/auth/AuthContext";
 import { apiFetch } from "@/src/lib/api";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { DemoSwitcher, HeaderBell } from "@/src/ui/app-chrome";
@@ -22,10 +23,12 @@ export default function MyDay() {
   const { colors } = useTheme();
   const router = useRouter();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const { data, isLoading, isError, refetch, isRefetching } = useQuery({
-    queryKey: ["my-day"],
+    queryKey: ["my-day", user?.id],
     queryFn: () => apiFetch<any>("/my-day"),
+    enabled: !!user,
   });
 
   const header = (
@@ -62,7 +65,7 @@ export default function MyDay() {
         <DemoSwitcher />
 
         {isTeacher ? (
-          <TeacherDay data={data} onOpen={(id) => router.push(`/session/${id}`)} onLesson={() => toast("Lesson plan opens in the full app")} router={router} toast={toast} />
+          <TeacherDay data={data} onOpen={(id) => router.push(`/session/${id}`)} router={router} toast={toast} />
         ) : (
           <AdminDay data={data} router={router} onOpen={(id) => router.push(`/session/${id}`)} />
         )}
@@ -71,7 +74,7 @@ export default function MyDay() {
   );
 }
 
-function TeacherDay({ data, onOpen, onLesson, router, toast }: any) {
+function TeacherDay({ data, onOpen, router, toast }: any) {
   const styles = useStyles();
   const next = data.next;
   return (
@@ -87,11 +90,41 @@ function TeacherDay({ data, onOpen, onLesson, router, toast }: any) {
             <Pressable testID="open-session" onPress={() => onOpen(next.id)} style={styles.nextBtn}>
               <Text style={styles.nextBtnText}>Open session</Text>
             </Pressable>
-            <Pressable testID="open-lesson" onPress={onLesson} style={[styles.nextBtn, styles.nextBtnGhost]}>
+            <Pressable
+              testID="open-lesson"
+              onPress={() => router.push({ pathname: "/lesson/[id]", params: { id: next.id } })}
+              style={[styles.nextBtn, styles.nextBtnGhost]}
+            >
               <Text style={styles.nextBtnGhostText}>Lesson plan</Text>
             </Pressable>
           </View>
         </View>
+      ) : null}
+
+      {data.classes?.length ? (
+        <>
+          <SectionHeader title="Class teacher" />
+          <Card style={{ padding: 0 }}>
+            {data.classes.map((c: any, i: number) => (
+              <Pressable
+                key={c.id}
+                testID="open-class"
+                onPress={() => router.push({ pathname: "/class/[id]", params: { id: c.id } })}
+                style={[styles.listRow, i > 0 && styles.rowBorder]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle}>
+                    {c.code} · {c.programme}
+                  </Text>
+                  <Text style={styles.rowSub}>
+                    {c.centre} · {c.students} students
+                  </Text>
+                </View>
+                <ArrowRight size={18} color={styles.rowSub.color as string} />
+              </Pressable>
+            ))}
+          </Card>
+        </>
       ) : null}
 
       <SectionHeader title="Today's timetable" right={`${data.timeline.length} sessions`} />
@@ -137,7 +170,10 @@ function TeacherDay({ data, onOpen, onLesson, router, toast }: any) {
             <Pressable
               key={i}
               testID={`attention-${i}`}
-              onPress={() => toast("Opens the related record in the full app")}
+              onPress={() => {
+                if (p.session_id) router.push(`/session/${p.session_id}`);
+                else toast("This follow-up has no class to open today");
+              }}
               style={[styles.listRow, i > 0 && styles.rowBorder]}
             >
               <View style={{ flex: 1 }}>

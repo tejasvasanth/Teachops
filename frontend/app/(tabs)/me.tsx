@@ -5,26 +5,31 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { useAuth } from "@/src/auth/AuthContext";
 import { apiFetch } from "@/src/lib/api";
-import { fonts, makeStyles, useTheme } from "@/src/theme";
+import { fonts, makeStyles, setThemePreference, useTheme, type ThemePreference } from "@/src/theme";
 import { HeaderBell } from "@/src/ui/app-chrome";
-import { AppHeader, Avatar, PrimaryButton, SectionHeader, StatusPill } from "@/src/ui/kit";
-import { useToast } from "@/src/ui/toast";
+import { AppHeader, Avatar, PrimaryButton, SectionHeader, Segmented, StatusPill } from "@/src/ui/kit";
 
 export default function Me() {
   const styles = useStyles();
-  const { colors } = useTheme();
+  const { colors, preference } = useTheme();
   const { user, logout } = useAuth();
   const router = useRouter();
-  const { toast } = useToast();
+
+  const { data: expenses } = useQuery({
+    queryKey: ["expenses", user?.id],
+    queryFn: () => apiFetch<{ items: any[] }>("/expenses"),
+    enabled: !!user,
+  });
 
   const { data: bal } = useQuery({
-    queryKey: ["leave-balances"],
+    queryKey: ["leave-balances", user?.id],
     queryFn: () => apiFetch<any>("/leave/balances"),
     enabled: user?.role === "teacher",
   });
   const { data: pay } = useQuery({
-    queryKey: ["pay"],
+    queryKey: ["pay", user?.id],
     queryFn: () => apiFetch<{ items: any[] }>("/pay"),
+    enabled: !!user,
   });
 
   const isTeacher = user?.role === "teacher";
@@ -84,16 +89,41 @@ export default function Me() {
           ) : null}
         </View>
 
+        <SectionHeader title="Appearance" />
+        <Segmented<ThemePreference>
+          testID="appearance"
+          value={preference}
+          onChange={setThemePreference}
+          options={[
+            { label: "Light", value: "light" },
+            { label: "Dark", value: "dark" },
+            { label: "Device", value: "system" },
+          ]}
+        />
+
         <SectionHeader title="Expenses" />
-        <Pressable testID="me-expense" onPress={() => toast("The expense claim form opens in the full app")} style={styles.list}>
-          <View style={styles.payRow}>
+        <View style={styles.list}>
+          {(expenses?.items ?? []).slice(0, 5).map((e, i) => (
+            <View key={e.id} style={[styles.payRow, i > 0 && styles.border]}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowTitle}>{e.title}</Text>
+                <Text style={styles.rowSub}>{e.detail}</Text>
+              </View>
+              <StatusPill label={e.status} kind={e.status === "Approved" ? "ok" : e.status === "Rejected" ? "bad" : "warn"} />
+            </View>
+          ))}
+          <Pressable
+            testID="me-expense"
+            onPress={() => router.push("/expense")}
+            style={[styles.payRow, expenses?.items?.length ? styles.border : null]}
+          >
             <View style={{ flex: 1 }}>
               <Text style={styles.rowTitle}>Submit a travel claim</Text>
               <Text style={styles.rowSub}>Reimbursed with your next pay period</Text>
             </View>
             <ArrowRight size={18} color={colors.muted} />
-          </View>
-        </Pressable>
+          </Pressable>
+        </View>
 
         <Pressable testID="logout" onPress={logout} style={styles.logout}>
           <SignOut size={18} color={colors.error} weight="bold" />

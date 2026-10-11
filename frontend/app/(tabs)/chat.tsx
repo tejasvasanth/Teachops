@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { Plus } from "phosphor-react-native";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 
+import { useAuth } from "@/src/auth/AuthContext";
 import { apiFetch } from "@/src/lib/api";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { HeaderBell } from "@/src/ui/app-chrome";
@@ -12,10 +13,12 @@ export default function Chat() {
   const styles = useStyles();
   const { colors } = useTheme();
   const router = useRouter();
+  const { user } = useAuth();
 
   const { data, isLoading, isError, refetch, isRefetching } = useQuery({
-    queryKey: ["conversations"],
+    queryKey: ["conversations", user?.id],
     queryFn: () => apiFetch<{ items: any[] }>("/conversations"),
+    enabled: !!user,
   });
 
   const header = <AppHeader title="Chat" subtitle="Official messages are kept on record" right={<HeaderBell />} />;

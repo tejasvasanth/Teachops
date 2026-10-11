@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 
+import { useAuth } from "@/src/auth/AuthContext";
 import { apiFetch } from "@/src/lib/api";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { HeaderBell } from "@/src/ui/app-chrome";
@@ -12,11 +13,13 @@ export default function Schedule() {
   const styles = useStyles();
   const { colors } = useTheme();
   const router = useRouter();
+  const { user } = useAuth();
   const [selected, setSelected] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch, isRefetching } = useQuery({
-    queryKey: ["schedule"],
+    queryKey: ["schedule", user?.id],
     queryFn: () => apiFetch<any>("/schedule"),
+    enabled: !!user,
   });
 
   const header = <AppHeader title="Schedule" subtitle="This week" right={<HeaderBell />} />;
@@ -38,7 +41,8 @@ export default function Schedule() {
     );
   }
 
-  const active = selected ?? data.today ?? data.week[0]?.date;
+  const todayInWeek = data.week.some((w: any) => w.date === data.today);
+  const active = selected ?? (todayInWeek ? data.today : data.week[0]?.date);
   const dayItems = data.days[active] ?? [];
   const activeLabel = data.week.find((w: any) => w.date === active);
 

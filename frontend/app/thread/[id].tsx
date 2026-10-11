@@ -1,33 +1,39 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { PaperPlaneRight } from "phosphor-react-native";
 import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useAuth } from "@/src/auth/AuthContext";
 import { apiFetch } from "@/src/lib/api";
+import { useToast } from "@/src/ui/toast";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
+import { useGoBack } from "@/src/ui/app-chrome";
 import { AppHeader, StateView, StatusPill } from "@/src/ui/kit";
 
 export default function Thread() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const styles = useStyles();
   const { colors } = useTheme();
-  const router = useRouter();
+  const goBack = useGoBack();
+  const { toast } = useToast();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
+  const { user } = useAuth();
   const scrollRef = useRef<ScrollView>(null);
   const [text, setText] = useState("");
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["thread", id],
+    queryKey: ["thread", user?.id, id],
     queryFn: () => apiFetch<any>(`/conversations/${id}/messages`),
+    enabled: !!user && !!id,
   });
 
   useEffect(() => {
     if (data) {
-      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["conversations", user?.id] });
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 60);
     }
   }, [data]);
@@ -36,15 +42,17 @@ export default function Thread() {
     mutationFn: (t: string) => apiFetch(`/conversations/${id}/messages`, { method: "POST", body: { text: t } }),
     onSuccess: () => {
       setText("");
-      qc.invalidateQueries({ queryKey: ["thread", id] });
+      qc.invalidateQueries({ queryKey: ["thread", user?.id, id] });
+      qc.invalidateQueries({ queryKey: ["conversations", user?.id] });
     },
+    onError: (e: any) => toast(e?.message ?? "Could not send"),
   });
 
   const header = (
     <AppHeader
       title={data?.conversation?.title ?? "Thread"}
       subtitle={data?.conversation?.official ? "Official thread, kept in organisation records" : data?.conversation?.subtitle}
-      onBack={() => router.back()}
+      onBack={goBack}
     />
   );
 
@@ -99,7 +107,7 @@ export default function Thread() {
           />
           <Pressable
             testID="thread-send"
-            onPress={() => text.trim() && send.mutate(text.trim())}
+            onPress={() => text.trim() && !send.isPending && send.mutate(text.trim())}
             style={styles.sendBtn}
           >
             <PaperPlaneRight size={20} color={colors.onBrandPrimary} weight="fill" />

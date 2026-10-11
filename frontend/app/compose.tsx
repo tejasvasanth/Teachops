@@ -7,6 +7,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { apiFetch } from "@/src/lib/api";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
+import { useGoBack } from "@/src/ui/app-chrome";
 import { AppHeader, PrimaryButton } from "@/src/ui/kit";
 import { useToast } from "@/src/ui/toast";
 
@@ -16,6 +17,7 @@ export default function Compose() {
   const styles = useStyles();
   const { colors } = useTheme();
   const router = useRouter();
+  const goBack = useGoBack();
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -44,7 +46,7 @@ export default function Compose() {
 
   return (
     <View style={styles.screen}>
-      <AppHeader title="New message" subtitle="Use this instead of email" onBack={() => router.back()} />
+      <AppHeader title="New message" subtitle="Use this instead of email" onBack={goBack} />
       <KeyboardAwareScrollView contentContainerStyle={styles.content} bottomOffset={16} keyboardShouldPersistTaps="handled">
         <Text style={styles.label}>To</Text>
         <View style={styles.options}>

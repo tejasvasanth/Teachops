@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Tabs } from "expo-router";
+import { Redirect, Tabs } from "expo-router";
 import {
   CalendarBlank,
   ChatCircleText,
@@ -9,23 +9,29 @@ import {
 } from "phosphor-react-native";
 import { Platform } from "react-native";
 
+import { useAuth } from "@/src/auth/AuthContext";
 import { apiFetch } from "@/src/lib/api";
 import { fonts, useTheme } from "@/src/theme";
 
 export default function TabsLayout() {
   const { colors } = useTheme();
+  const { user } = useAuth();
 
   const { data: inbox } = useQuery({
-    queryKey: ["inbox"],
+    queryKey: ["inbox", user?.id],
     queryFn: () => apiFetch<{ items: any[] }>("/inbox"),
+    enabled: !!user,
   });
   const { data: convos } = useQuery({
-    queryKey: ["conversations"],
+    queryKey: ["conversations", user?.id],
     queryFn: () => apiFetch<{ items: { unread: number }[] }>("/conversations"),
+    enabled: !!user,
   });
 
   const pending = (inbox?.items ?? []).filter((r) => r.status === "Pending").length;
   const unreadChats = (convos?.items ?? []).reduce((a, c) => a + (c.unread || 0), 0);
+
+  if (!user) return <Redirect href="/login" />;
 
   return (
     <Tabs

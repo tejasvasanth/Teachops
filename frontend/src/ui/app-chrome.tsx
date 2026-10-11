@@ -5,16 +5,28 @@ import { useRouter } from "expo-router";
 import { Bell } from "phosphor-react-native";
 import { Pressable, Text, View } from "react-native";
 
+import { useToast } from "@/src/ui/toast";
+
 import { useAuth } from "@/src/auth/AuthContext";
 import { apiFetch } from "@/src/lib/api";
 import { fonts, makeStyles, useTheme } from "@/src/theme";
 
+export function useGoBack() {
+  const router = useRouter();
+  return () => {
+    if (router.canGoBack()) router.back();
+    else router.replace("/(tabs)");
+  };
+}
+
 export function HeaderBell() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { user } = useAuth();
   const { data } = useQuery({
-    queryKey: ["notifications"],
+    queryKey: ["notifications", user?.id],
     queryFn: () => apiFetch<{ unread: number }>("/notifications"),
+    enabled: !!user,
   });
   const unread = data?.unread ?? 0;
   return (
@@ -48,6 +60,7 @@ const ROLES = ["Teacher", "Coordinator", "Administrator"] as const;
 
 export function DemoSwitcher() {
   const { user, demoLogin } = useAuth();
+  const { toast } = useToast();
   const styles = useStyles();
   const current = (user?.role_label?.includes("Coordinator")
     ? "Coordinator"
@@ -65,7 +78,10 @@ export function DemoSwitcher() {
             <Pressable
               key={r}
               testID={`demo-switch-${r.toLowerCase()}`}
-              onPress={() => !active && demoLogin(r)}
+              onPress={() => {
+                if (active) return;
+                demoLogin(r).catch((e: any) => toast(e?.message ?? "Could not switch role"));
+              }}
               style={[styles.pill, active && styles.pillActive]}
             >
               <Text style={[styles.pillText, active && styles.pillTextActive]}>{r}</Text>
